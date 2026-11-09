@@ -268,7 +268,7 @@ function uid() { return 'sp_'+Date.now()+'_'+Math.random().toString(36).slice(2,
 
 // Debounced save to Firebase (waits 600ms after last change)
 // Firebase setup
-firebase.initializeApp({ databaseURL: 'https://sir-trucking-inc-default-rtdb.firebaseio.com/' });
+firebase.initializeApp({ databaseURL: 'https://sir-trucking-inc-default-rtdb.europe-west1.firebasedatabase.app' });
 var db = firebase.database();
 var spotsDiagramRef = db.ref('spot_diagram');
 var historyRef = db.ref('spot_history');
