@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SIR Trucking Spot Diagram</title>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<style>
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:'Segoe UI',Arial,sans-serif; background:#0d1117; color:#e0e0e0; min-height:100vh; overflow-x:hidden; }
+
+h1 { text-align:center; color:#f0c040; font-size:1.2rem; letter-spacing:2px; padding:8px 0 2px; }
+.subtitle { text-align:center; color:#445; font-size:0.7rem; margin-bottom:6px; }
+
+/* TOOLBAR */
+.toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:5px; padding:4px 10px 8px; border-bottom:1px solid #1a2235; }
+.legend { display:flex; gap:8px; flex-wrap:wrap; font-size:0.68rem; margin-right:auto; }
+.legend-item { display:flex; align-items:center; gap:3px; }
+.legend-dot { width:9px; height:9px; border-radius:2px; }
+.tbtn { padding:5px 11px; background:#161b27; color:#bbb; border:1px solid #2a3245; border-radius:5px; cursor:pointer; font-size:0.72rem; white-space:nowrap; }
+.tbtn:hover { background:#1e2a40; color:#fff; }
+.tbtn.b10  { background:#0d2237; border-color:#1a4a76; color:#7ec8ff; }
+.tbtn.b8   { background:#0d2a1a; border-color:#1a6632; color:#7effa9; }
+.tbtn.free { background:#1e0d37; border-color:#5b2d8e; color:#c084fc; }
+
+/* CANVAS */
+#canvas {
+  position:relative; width:100%; min-height:calc(100vh - 90px);
+  background:#07101a;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.015) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,0.015) 1px,transparent 1px);
+  background-size:40px 40px;
+}
+
+/* BELT LANE BACKGROUNDS — visual guides only, not containers */
+.lane {
+  position:absolute; left:0; right:0; pointer-events:none;
+  display:flex; align-items:center;
+}
+.lane-label {
+  position:absolute; left:8px; top:50%; transform:translateY(-50%);
+  font-size:0.58rem; letter-spacing:2px; text-transform:uppercase;
+  font-weight:bold; opacity:0.5; white-space:nowrap; pointer-events:none;
+  user-select:none;
+}
+.lane-divider {
+  position:absolute; left:0; right:0; height:3px; pointer-events:none;
+  background:repeating-linear-gradient(90deg,#f0c04044 0,#f0c04044 12px,transparent 12px,transparent 24px);
+}
+.lane-divider-label {
+  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  font-size:0.58rem; color:#f0c040aa; background:#07101a; padding:0 10px;
+  letter-spacing:2px; white-space:nowrap; font-weight:bold; pointer-events:none;
+}
+
+/* SPOT CARDS */
+.spot-card {
+  position:absolute; background:#101828; border:2px solid #1a3a5c;
+  border-radius:9px; width:115px; padding:8px 6px 10px;
+  cursor:grab; display:flex; flex-direction:column; align-items:center;
+  gap:4px; user-select:none; touch-action:none;
+  transition:border-color 0.12s, box-shadow 0.12s;
+  min-height:115px;
+}
+.spot-card:hover { border-color:#f0c040; box-shadow:0 0 8px #f0c04040; z-index:10; }
+.spot-card.bulk   { border-color:#7b241c; }
+.spot-card.bulk:hover { border-color:#e05050; }
+.spot-card.dragging { cursor:grabbing; opacity:0.9; box-shadow:0 6px 24px rgba(0,0,0,0.7); z-index:1000; border-color:#f0c040; }
+.spot-card.free-card { border-color:#5b2d8e; }
+.spot-card.free-card:hover { border-color:#c084fc; box-shadow:0 0 8px #c084fc50; }
+.spot-card.free-card.bulk { border-color:#7b241c; }
+
+.edit-icon { position:absolute; top:4px; right:7px; font-size:0.72rem; color:#2a3a55; cursor:pointer; line-height:1; }
+.spot-card:hover .edit-icon { color:#f0c040; }
+.spot-card.free-card:hover .edit-icon { color:#c084fc; }
+.spot-num { font-size:1.15rem; font-weight:bold; color:#f0c040; }
+.spot-driver { font-size:0.82rem; color:#ddd; text-align:center; word-break:break-word; min-height:16px; }
+.type-badge { font-size:0.65rem; padding:2px 6px; border-radius:6px; font-weight:bold; }
+.badge-reg  { background:#1b4f72; color:#aed6f1; }
+.badge-bulk { background:#7b241c; color:#f1948a; }
+.badge-free { background:#4a235a; color:#d7bde2; }
+.spot-area  { font-size:0.72rem; color:#7ec8e3; text-align:center; font-style:italic; }
+.empty-txt  { color:#2a3a3a; font-size:0.78rem; }
+
+/* MODAL */
+.modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:3000; align-items:center; justify-content:center; }
+.modal-overlay.open { display:flex; }
+.modal { background:#0d1b2e; border:2px solid #f0c040; border-radius:10px; padding:18px; width:290px; max-width:95vw; }
+.modal h2 { color:#f0c040; margin-bottom:12px; font-size:0.95rem; }
+.modal label { display:block; font-size:0.72rem; color:#888; margin:7px 0 2px; }
+.modal input, .modal select { width:100%; padding:6px 8px; background:#07101a; border:1px solid #2a3a55; border-radius:5px; color:#e0e0e0; font-size:0.82rem; }
+.modal input:focus, .modal select:focus { outline:2px solid #f0c040; }
+.modal-btns { display:flex; gap:5px; margin-top:12px; }
+.btn { flex:1; padding:7px; border:none; border-radius:5px; font-size:0.82rem; cursor:pointer; font-weight:bold; }
+.btn-save   { background:#f0c040; color:#0d1117; }
+.btn-cancel { background:#07101a; color:#999; border:1px solid #2a3a55; }
+.btn-del    { background:#7b241c; color:#f1948a; }
+
+.toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#0d2a3a; color:#7ec8e3; padding:7px 18px; border-radius:20px; font-size:0.75rem; opacity:0; transition:opacity 0.3s; pointer-events:none; z-index:4000; }
+.toast.show { opacity:1; }
+
+/* HISTORY */
+.history-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:5000; align-items:flex-start; justify-content:center; padding-top:40px; }
+.history-overlay.open { display:flex; }
+.history-panel { background:#0d1b2e; border:2px solid #f0c040; border-radius:12px; width:560px; max-width:97vw; max-height:80vh; display:flex; flex-direction:column; overflow:hidden; }
+.history-header { display:flex; align-items:center; padding:14px 16px 10px; border-bottom:1px solid #1a2a40; gap:10px; }
+.history-header h2 { color:#f0c040; font-size:1rem; flex:1; margin:0; }
+.hclose { background:none; border:none; color:#888; font-size:1.1rem; cursor:pointer; padding:2px 6px; }
+.hclose:hover { color:#fff; }
+.author-row { display:flex; gap:6px; padding:6px 14px 8px; background:#07101a; border-bottom:1px solid #1a2a40; align-items:center; }
+.author-row label { font-size:0.7rem; color:#666; white-space:nowrap; }
+.author-row input { flex:1; padding:4px 8px; background:#0d1b2e; border:1px solid #1a2a40; border-radius:4px; color:#aaa; font-size:0.75rem; }
+.save-row { display:flex; gap:6px; padding:10px 14px; border-bottom:1px solid #1a2a40; background:#07101a; }
+.save-row input { flex:1; padding:6px 10px; background:#0d1b2e; border:1px solid #2a3a55; border-radius:5px; color:#e0e0e0; font-size:0.82rem; }
+.save-row input::placeholder { color:#3a4a60; }
+.btn-snapshot { padding:6px 14px; background:#f0c040; color:#0d1117; border:none; border-radius:5px; font-size:0.82rem; font-weight:bold; cursor:pointer; white-space:nowrap; }
+.history-list { overflow-y:auto; flex:1; padding:8px 0; }
+.history-empty { text-align:center; color:#334; font-size:0.8rem; padding:30px; }
+.version-row { display:flex; align-items:center; gap:8px; padding:9px 14px; border-bottom:1px solid #0a1420; }
+.version-row:hover { background:#101e30; }
+.vdot { width:8px; height:8px; border-radius:50%; background:#f0c040; flex-shrink:0; }
+.vdot.auto { background:#336; }
+.vinfo { flex:1; min-width:0; }
+.vname { font-size:0.82rem; color:#e0e0e0; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.vmeta { font-size:0.65rem; color:#556; margin-top:1px; }
+.vmeta .author { color:#7ec8e3; }
+.vchanges { font-size:0.65rem; color:#445; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.vactions { display:flex; gap:4px; flex-shrink:0; }
+.btn-restore { padding:3px 10px; background:#0d2a1a; color:#7effa9; border:1px solid #1a6632; border-radius:4px; font-size:0.7rem; cursor:pointer; }
+.btn-restore:hover { background:#1a4a2a; }
+.btn-restore.current { background:#1a3a10; color:#4a8a60; border-color:#2a4a20; cursor:default; }
+.btn-del-ver { padding:3px 7px; background:#200a0a; color:#7b241c; border:1px solid #3a1010; border-radius:4px; font-size:0.7rem; cursor:pointer; }
+.btn-del-ver:hover { color:#f1948a; border-color:#7b241c; }
+.hfooter { padding:8px 14px; border-top:1px solid #1a2a40; font-size:0.65rem; color:#334; text-align:center; }
+.btn-clear { background:none; border:none; color:#3a2020; font-size:0.65rem; cursor:pointer; text-decoration:underline; }
+.btn-clear:hover { color:#7b241c; }
+</style>
+</head>
+<body>
+
+<h1>🚛 SIR TRUCKING — SPOT DIAGRAM</h1>
+<p class="subtitle">Drag any spot card freely anywhere on the canvas · Click ✏️ to edit · <span id="sync-status" style="color:#f0c040">Loading...</span></p>
+
+<div class="toolbar">
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#1b4f72;border:1px solid #2980b9"></div>Regular</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7b241c;border:1px solid #e05050"></div>Bulk</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#4a235a;border:1px solid #6c3483"></div>Free</div>
+  </div>
+  <button class="tbtn b10"  onclick="addSpot('belt10')">+ Belt 10</button>
+  <button class="tbtn b8"   onclick="addSpot('belt8')">+ Belt 8</button>
+  <button class="tbtn free" onclick="addSpot('free')">+ Free Spot</button>
+  <button class="tbtn"      onclick="openHistory()">🕐 History</button>
+  <button class="tbtn"      onclick="exportData()">📋 Copy JSON</button>
+  <button class="tbtn"      onclick="resetAll()">↺ Reset</button>
+</div>
+
+<div id="canvas"></div>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <h2 id="modal-title">✏️ Edit Spot</h2>
+    <label>Spot Number</label>
+    <input id="edit-num" type="text" placeholder="e.g. 1046">
+    <label>Driver Name</label>
+    <input id="edit-driver" type="text" placeholder="Driver name">
+    <label>Type</label>
+    <select id="edit-type">
+      <option value="reg">Regular</option>
+      <option value="bulk">Bulk</option>
+    </select>
+    <label>Area / Zone</label>
+    <select id="edit-area">
+      <option value="">— select area —</option>
+      <option value="Rosenberg">Rosenberg</option>
+      <option value="Rosharon">Rosharon</option>
+      <option value="Needville">Needville</option>
+      <option value="Damon">Damon</option>
+    </select>
+    <div class="modal-btns">
+      <button class="btn btn-del"    onclick="deleteSpot()">🗑</button>
+      <button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-save"   onclick="saveSpot()">Save</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<!-- HISTORY -->
+<div class="history-overlay" id="history-overlay">
+  <div class="history-panel">
+    <div class="history-header">
+      <h2>🕐 Version History</h2>
+      <button class="hclose" onclick="closeHistory()">✕</button>
+    </div>
+    <div class="author-row">
+      <label>Your name:</label>
+      <input id="author-name" type="text" placeholder="e.g. Mohammed" maxlength="40">
+    </div>
+    <div class="save-row">
+      <input id="snapshot-label" type="text" placeholder="Describe this version — e.g. 'Jordan moved to Belt 10'" maxlength="80">
+      <button class="btn-snapshot" onclick="saveSnapshot()">💾 Save Version</button>
+    </div>
+    <div class="history-list" id="history-list"></div>
+    <div class="hfooter">Versions saved in this browser &nbsp;·&nbsp;
+      <button class="btn-clear" onclick="clearHistory()">clear all history</button>
+    </div>
+  </div>
+</div>
+
+<script>var HISTORY_KEY = 'sir_history_v1';
+var AUTHOR_KEY  = 'sir_author';
+var _saveTimer  = null;
+
+var LANES = [
+  { y:20,  h:155, color:'rgba(13,34,55,0.6)',   label:'BELT 10 — SOLO SIDE (1064–1077)',         labelColor:'#2a5a99' },
+  { y:205, h:155, color:'rgba(13,34,55,0.4)',   label:'BELT 10 — FACING BELT 8 (1011–1059)',     labelColor:'#4a88c8' },
+  { y:368, h:14,  color:'transparent',           divider:true,  label:'OPEN LANE',               labelColor:'#f0c040' },
+  { y:390, h:155, color:'rgba(13,55,27,0.4)',   label:'BELT 8 — FACING BELT 10 (822–858)',       labelColor:'#2a9955' },
+  { y:575, h:155, color:'rgba(50,13,80,0.3)',   label:'FREE SPOTS — NO BELT',                     labelColor:'#7a40c0' },
+];
+
+var DEFAULT = {
+  spots: [
+    // Belt 10 solo side (top lane, y≈35)
+    {id:'b10_8',  num:'1064', driver:'Romell', type:'reg',  group:'belt10', x:10,  y:35 },
+    {id:'b10_9',  num:'1065', driver:'',       type:'reg',  group:'belt10', x:130, y:35 },
+    {id:'b10_10', num:'1070', driver:'Devon',  type:'reg',  group:'belt10', x:250, y:35 },
+    {id:'b10_11', num:'1071', driver:'',       type:'reg',  group:'belt10', x:370, y:35 },
+    {id:'b10_12', num:'1076', driver:'Hector', type:'bulk', group:'belt10', x:490, y:35 },
+    {id:'b10_13', num:'1077', driver:'',       type:'reg',  group:'belt10', x:610, y:35 },
+    // Belt 10 facing side (second lane, y≈220)
+    {id:'b10_1',  num:'1011', driver:'Jefferson', type:'reg', group:'belt10', x:10,  y:220 },
+    {id:'b10_2',  num:'1017', driver:'Javier',    type:'reg', group:'belt10', x:130, y:220 },
+    {id:'b10_3',  num:'1046', driver:'',           type:'reg', group:'belt10', x:250, y:220 },
+    {id:'b10_4',  num:'1052', driver:'Charles',   type:'reg', group:'belt10', x:370, y:220 },
+    {id:'b10_5',  num:'1053', driver:'',           type:'reg', group:'belt10', x:490, y:220 },
+    {id:'b10_6',  num:'1058', driver:'Trenton',   type:'reg', group:'belt10', x:610, y:220 },
+    {id:'b10_7',  num:'1059', driver:'',           type:'reg', group:'belt10', x:730, y:220 },
+    // Belt 8 facing (third lane, y≈430)
+    {id:'b8_1', num:'822', driver:'Gayland',  type:'reg',  group:'belt8', x:10,  y:430 },
+    {id:'b8_2', num:'828', driver:'Kashif',   type:'reg',  group:'belt8', x:130, y:430 },
+    {id:'b8_3', num:'834', driver:'TonyChua', type:'bulk', group:'belt8', x:250, y:430 },
+    {id:'b8_4', num:'840', driver:'Tyrek',    type:'reg',  group:'belt8', x:370, y:430 },
+    {id:'b8_5', num:'846', driver:'Angel',    type:'reg',  group:'belt8', x:490, y:430 },
+    {id:'b8_6', num:'852', driver:'Careg',    type:'bulk', group:'belt8', x:610, y:430 },
+    {id:'b8_7', num:'858', driver:'Iziah',    type:'reg',  group:'belt8', x:730, y:430 },
+    // Free spots (bottom lane, y≈620)
+    {id:'f1', num:'1801', driver:'Jordan',         type:'reg', group:'free', x:10,  y:620 },
+    {id:'f2', num:'1802', driver:'Ashton',         type:'reg', group:'free', x:130, y:620 },
+    {id:'f3', num:'1803', driver:'Alberto/Victor', type:'reg', group:'free', x:250, y:620 },
+    {id:'f4', num:'1804', driver:'Allen',          type:'reg', group:'free', x:370, y:620 },
+    {id:'f5', num:'1805', driver:'Kyondre',        type:'reg', group:'free', x:490, y:620 },
+    {id:'f6', num:'1806', driver:'Angel (new)',    type:'reg', group:'free', x:10,  y:755 },
+    {id:'f7', num:'1807', driver:'Angel (new)',    type:'reg', group:'free', x:130, y:755 },
+    {id:'f8', num:'1088', driver:'Carlos',         type:'reg', group:'free', x:250, y:755 },
+  ]
+};
+
+var state = JSON.parse(JSON.stringify(DEFAULT));
+var editId = null;
+var _initialLoad = true;
+
+function uid() { return 'sp_'+Date.now()+'_'+Math.random().toString(36).slice(2,5); }
+
+// Debounced save to Firebase (waits 600ms after last change)
+// Firebase setup
+firebase.initializeApp({ databaseURL: 'https://sir-trucking-inc-default-rtdb.firebaseio.com/' });
+var db = firebase.database();
+var spotsDiagramRef = db.ref('spot_diagram');
+var historyRef = db.ref('spot_history');
+
+// Debounced save to Firebase
+function save() {
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(function() {
+    setSyncStatus('saving');
+    spotsDiagramRef.set(state, function(err) {
+      setSyncStatus(err ? 'error' : 'saved');
+    });
+  }, 600);
+}
+
+function setSyncStatus(s) {
+  var el = document.getElementById('sync-status');
+  if (!el) return;
+  if (s === 'live')   { el.textContent = 'Live — shared with team'; el.style.color = '#7effa9'; }
+  if (s === 'saving') { el.textContent = 'Saving...';               el.style.color = '#f0c040'; }
+  if (s === 'saved')  { el.textContent = 'Saved';                   el.style.color = '#7effa9'; setTimeout(function(){ setSyncStatus('live'); }, 1500); }
+  if (s === 'error')  { el.textContent = 'Save failed — check connection'; el.style.color = '#ff6b6b'; }
+}
+
+// Firebase real-time listener (replaces polling)
+function startPolling() { /* no-op — Firebase handles real-time */ }
+
+
+/* ══════════════ BUILD CANVAS ══════════════ */
+function buildCanvas() {
+  var canvas = document.getElementById('canvas');
+  canvas.innerHTML = '';
+
+  // Draw lane backgrounds (visual guides)
+  var totalH = 0;
+  LANES.forEach(function(lane) {
+    var el = document.createElement('div');
+    if (lane.divider) {
+      el.className = 'lane-divider';
+      el.style.top = lane.y + 'px';
+      var lbl = document.createElement('span');
+      lbl.className = 'lane-divider-label';
+      lbl.textContent = lane.label;
+      el.appendChild(lbl);
+    } else {
+      el.className = 'lane';
+      el.style.top = lane.y + 'px';
+      el.style.height = lane.h + 'px';
+      el.style.background = lane.color;
+      var lbl = document.createElement('div');
+      lbl.className = 'lane-label';
+      lbl.style.color = lane.labelColor;
+      lbl.textContent = lane.label;
+      el.appendChild(lbl);
+    }
+    canvas.appendChild(el);
+    totalH = Math.max(totalH, lane.y + lane.h + 20);
+  });
+
+  canvas.style.minHeight = Math.max(totalH + 100, 750) + 'px';
+
+  // Draw all cards
+  state.spots.forEach(function(spot) { canvas.appendChild(makeCard(spot)); });
+
+  // Expand canvas for any out-of-bounds cards
+  expandCanvas();
+}
+
+function expandCanvas() {
+  var canvas = document.getElementById('canvas');
+  var maxY = 750;
+  state.spots.forEach(function(sp) { if ((sp.y||0)+120 > maxY) maxY = (sp.y||0)+130; });
+  if (maxY > parseInt(canvas.style.minHeight||750)) canvas.style.minHeight = maxY + 'px';
+}
+
+function makeCard(spot) {
+  var isFree = spot.group === 'free';
+  var card = document.createElement('div');
+  card.className = 'spot-card' + (isFree ? ' free-card' : '') + (spot.type==='bulk'?' bulk':'');
+  card.style.left = (spot.x||10) + 'px';
+  card.style.top  = (spot.y||10) + 'px';
+  card.dataset.id = spot.id;
+  card.innerHTML =
+    '<span class="edit-icon" title="Edit">✏️</span>' +
+    '<div class="spot-num">'+(spot.num||'—')+'</div>' +
+    '<div class="spot-driver">'+(spot.driver||'<span class="empty-txt">Empty</span>')+'</div>' +
+    '<div class="type-badge '+(isFree?'badge-free':(spot.type==='bulk'?'badge-bulk':'badge-reg'))+'">'+(isFree?'FREE':(spot.type==='bulk'?'BULK':'REG'))+'</div>' +
+    '<div class="spot-area">'+(spot.area||'')+'</div>';
+  card.querySelector('.edit-icon').addEventListener('click', function(e) {
+    e.stopPropagation(); e.preventDefault(); openModal(spot.id);
+  });
+  makeCardDraggable(card, spot);
+  return card;
+}
+
+/* ══════════════ DRAG ══════════════ */
+var drag = null;
+
+function makeCardDraggable(card, spot) {
+  function onDown(cx, cy) {
+    drag = { card:card, spot:spot, sx:cx, sy:cy, ox:spot.x||0, oy:spot.y||0 };
+    card.classList.add('dragging');
+    card.style.zIndex = 1000;
+  }
+  card.addEventListener('mousedown', function(e) {
+    if (e.target.classList.contains('edit-icon')) return;
+    e.preventDefault(); e.stopPropagation();
+    onDown(e.clientX, e.clientY);
+  });
+  card.addEventListener('touchstart', function(e) {
+    if (e.target.classList.contains('edit-icon')) return;
+    e.preventDefault(); e.stopPropagation();
+    onDown(e.touches[0].clientX, e.touches[0].clientY);
+  }, {passive:false});
+}
+
+document.addEventListener('mousemove', function(e) { if(drag) applyDrag(e.clientX, e.clientY); });
+document.addEventListener('touchmove', function(e) {
+  if(drag) { e.preventDefault(); applyDrag(e.touches[0].clientX, e.touches[0].clientY); }
+}, {passive:false});
+
+function applyDrag(cx, cy) {
+  var nx = Math.max(0, drag.ox + cx - drag.sx);
+  var ny = Math.max(0, drag.oy + cy - drag.sy);
+  drag.card.style.left = nx + 'px';
+  drag.card.style.top  = ny + 'px';
+  drag.spot.x = Math.round(nx);
+  drag.spot.y = Math.round(ny);
+  expandCanvas();
+}
+
+document.addEventListener('mouseup',  endDrag);
+document.addEventListener('touchend', endDrag);
+
+function endDrag() {
+  if (!drag) return;
+  drag.card.classList.remove('dragging');
+  drag.card.style.zIndex = '';
+  drag = null;
+  save();
+}
+
+/* ══════════════ VERSION HISTORY ══════════════ */
+var _historyCache = [];
+historyRef.on('value', function(snap) {
+  var data = snap.val();
+  _historyCache = data ? (Array.isArray(data) ? data : Object.values(data)) : [];
+  _historyCache.sort(function(a,b){ return b.id - a.id; });
+  renderHistoryList();
+});
+function loadHistory() { return _historyCache; }
+function saveHistArr(h) {
+  _historyCache = h;
+  historyRef.set(h, function(err){
+    if(err) { try { localStorage.setItem('sir_history_v1', JSON.stringify(h)); } catch(e){} }
+  });
+}
+
+
+function loadAuthor() { return localStorage.getItem(AUTHOR_KEY)||''; }
+function saveSnapshot(autoLabel) {
+  var labelEl=document.getElementById('snapshot-label'), authorEl=document.getElementById('author-name');
+  var author=(authorEl?authorEl.value.trim():'')||loadAuthor()||'Unknown';
+  var label=autoLabel||(labelEl?labelEl.value.trim():'');
+  if(!autoLabel&&!label){ toast('⚠️ Enter a description first'); return; }
+  if(authorEl&&authorEl.value.trim()) { try{ localStorage.setItem(AUTHOR_KEY,authorEl.value.trim()); }catch(e){} }
+  var h=loadHistory();
+  h.unshift({ id:Date.now(), label:label||'Auto-save', author:author, ts:new Date().toISOString(), auto:!!autoLabel, state:JSON.stringify(state), changes:buildChangeSummary(h) });
+  if(h.length>50) h.length=50;
+  saveHistArr(h);
+  if(labelEl&&!autoLabel) labelEl.value='';
+  renderHistoryList();
+  toast(autoLabel?'🔄 Auto-saved':'✅ Version saved!');
+}
+function buildChangeSummary(h) {
+  if(!h.length) return 'Initial save';
+  try {
+    var prev=JSON.parse(h[0].state), diffs=[];
+    var pspots=prev.spots||[], cspots=state.spots||[];
+    var b10p=pspots.filter(function(s){return s.group==='belt10';}).length;
+    var b10c=cspots.filter(function(s){return s.group==='belt10';}).length;
+    var b8p=pspots.filter(function(s){return s.group==='belt8';}).length;
+    var b8c=cspots.filter(function(s){return s.group==='belt8';}).length;
+    var fp=pspots.filter(function(s){return s.group==='free';}).length;
+    var fc=cspots.filter(function(s){return s.group==='free';}).length;
+    if(b10p!==b10c) diffs.push('Belt 10: '+b10p+'→'+b10c);
+    if(b8p!==b8c)   diffs.push('Belt 8: '+b8p+'→'+b8c);
+    if(fp!==fc)     diffs.push('Free: '+fp+'→'+fc);
+    var dc=0;
+    cspots.forEach(function(s){ var p=pspots.find(function(x){return x.id===s.id;}); if(p&&p.driver!==s.driver) dc++; });
+    if(dc) diffs.push(dc+' driver(s) changed');
+    return diffs.length?diffs.join(' · '):'Positions updated';
+  } catch(e){ return ''; }
+}
+function openHistory() {
+  var a=loadAuthor(); if(a) document.getElementById('author-name').value=a;
+  renderHistoryList(); document.getElementById('history-overlay').classList.add('open');
+}
+function closeHistory() { document.getElementById('history-overlay').classList.remove('open'); }
+function escH(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function renderHistoryList() {
+  var list=document.getElementById('history-list'); if(!list) return;
+  var h=loadHistory();
+  if(!h.length){ list.innerHTML='<div class="history-empty">No saved versions yet.<br>Make changes then click 💾 Save Version.</div>'; return; }
+  list.innerHTML='';
+  h.forEach(function(v,i){
+    var row=document.createElement('div'); row.className='version-row';
+    var d=new Date(v.ts);
+    row.innerHTML='<div class="vdot '+(v.auto?'auto':'')+'"></div>'+
+      '<div class="vinfo"><div class="vname">'+escH(v.label)+'</div>'+
+      '<div class="vmeta">'+d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' '+d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})+
+      ' &nbsp;·&nbsp; <span class="author">'+escH(v.author)+'</span></div>'+
+      (v.changes?'<div class="vchanges">'+escH(v.changes)+'</div>':'')+
+      '</div><div class="vactions">'+
+      (i===0?'<span class="btn-restore current">Current</span>':'<button class="btn-restore" onclick="restoreVersion('+v.id+')">Restore</button>')+
+      '<button class="btn-del-ver" onclick="deleteVersion('+v.id+')">✕</button></div>';
+    list.appendChild(row);
+  });
+}
+function restoreVersion(id) {
+  var h=loadHistory(), v=h.find(function(x){return x.id===id;});
+  if(!v) return;
+  saveSnapshot('Before restore: '+v.label);
+  state=JSON.parse(v.state); save(); buildCanvas(); renderHistoryList();
+  toast('↩️ Restored to: '+v.label);
+}
+function deleteVersion(id) {
+  var h=loadHistory(), idx=h.findIndex(function(x){return x.id===id;});
+  if(idx===0&&h.length>1){ toast('⚠️ Cannot delete the current version'); return; }
+  h.splice(idx,1); saveHistArr(h); renderHistoryList();
+  toast('Version deleted');
+}
+function clearHistory() {
+  saveHistArr([]); renderHistoryList(); toast('🗑️ History cleared');
+}
+
+/* ══════════════ MODAL ══════════════ */
+function openModal(id) {
+  editId = id;
+  var sp = state.spots.find(function(s){return s.id===id;});
+  if (!sp) return;
+  document.getElementById('modal-title').textContent = '✏️ Edit Spot';
+  document.getElementById('edit-num').value    = sp.num    || '';
+  document.getElementById('edit-driver').value = sp.driver || '';
+  document.getElementById('edit-type').value   = sp.type   || 'reg';
+  document.getElementById('edit-area').value   = sp.area   || '';
+  document.getElementById('modal').classList.add('open');
+}
+function closeModal() { document.getElementById('modal').classList.remove('open'); editId=null; }
+function saveSpot() {
+  var sp = state.spots.find(function(s){return s.id===editId;});
+  if (!sp) return;
+  sp.num    = document.getElementById('edit-num').value.trim();
+  sp.driver = document.getElementById('edit-driver').value.trim();
+  sp.type   = document.getElementById('edit-type').value;
+  sp.area   = document.getElementById('edit-area').value;
+  save();
+  // update card in-place without full rebuild
+  var card = document.querySelector('.spot-card[data-id="'+editId+'"]');
+  if (card) {
+    var isFree = sp.group === 'free';
+    card.querySelector('.spot-num').textContent = sp.num||'—';
+    card.querySelector('.spot-driver').innerHTML = sp.driver||'<span class="empty-txt">Empty</span>';
+    var badge = card.querySelector('.type-badge');
+    badge.className = 'type-badge '+(isFree?'badge-free':(sp.type==='bulk'?'badge-bulk':'badge-reg'));
+    badge.textContent = isFree?'FREE':(sp.type==='bulk'?'BULK':'REG');
+    card.querySelector('.spot-area').textContent = sp.area||'';
+    card.className = 'spot-card'+(isFree?' free-card':'')+(sp.type==='bulk'?' bulk':'');
+  }
+  closeModal();
+}
+function deleteSpot() {
+  state.spots = state.spots.filter(function(s){return s.id!==editId;});
+  save();
+  var card = document.querySelector('.spot-card[data-id="'+editId+'"]');
+  if (card) card.remove();
+  closeModal();
+  toast('🗑️ Spot deleted');
+}
+
+/* ══════════════ ADD / RESET / EXPORT ══════════════ */
+function addSpot(group) {
+  var yMap = { belt10:30, belt8:352, free:506 };
+  var existing = state.spots.filter(function(s){return s.group===group;});
+  var maxX = 0;
+  existing.forEach(function(s){ if((s.x||0)>maxX) maxX=s.x||0; });
+  var nx = existing.length ? Math.min(maxX+102, 700) : 10;
+  var ny = yMap[group]||10;
+  var sp = {id:uid(), num:'NEW', driver:'', type:'reg', area:'', group:group, x:nx, y:ny};
+  state.spots.push(sp);
+  save();
+  var canvas=document.getElementById('canvas');
+  canvas.appendChild(makeCard(sp));
+  expandCanvas();
+  setTimeout(function(){ openModal(sp.id); }, 50);
+}
+function exportData() {
+  var j=JSON.stringify(state,null,2);
+  navigator.clipboard.writeText(j).then(function(){toast('✅ JSON copied!');}).catch(function(){prompt('Copy:',j);});
+}
+function resetAll() {
+  state=JSON.parse(JSON.stringify(DEFAULT)); save(); buildCanvas(); toast('↺ Reset to original layout');
+}
+function toast(msg) {
+  var el=document.getElementById('toast');
+  el.textContent=msg; el.classList.add('show');
+  setTimeout(function(){el.classList.remove('show');},2200);
+}
+
+/* ══════════════ EVENTS ══════════════ */
+document.getElementById('modal').addEventListener('click',function(e){ if(e.target===this) closeModal(); });
+document.getElementById('history-overlay').addEventListener('click',function(e){ if(e.target===this) closeHistory(); });
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'){ closeModal(); closeHistory(); }
+  if(e.key==='Enter'&&document.getElementById('modal').classList.contains('open')) saveSpot();
+});
+
+// Canvas is built by Firebase listener above when data first arrives
+// Auto-save initial version to history if none exists yet
+// Firebase real-time listener — loads data and re-renders on any change
+var _initialLoad = true;
+spotsDiagramRef.on('value', function(snap) {
+  var data = snap.val();
+  if (!data || !data.spots || !data.spots.length) {
+    if (_initialLoad) {
+      _initialLoad = false;
+      spotsDiagramRef.set(state);
+    }
+    setSyncStatus('live');
+    buildCanvas();
+    return;
+  }
+  _initialLoad = false;
+  state = data;
+  setSyncStatus('live');
+  buildCanvas();
+});
+
+setTimeout(function(){
+  if(!loadHistory().length){ saveSnapshot('Initial diagram — from paper drawing'); }
+}, 2000);
+</script>
+</body>
+</html>
